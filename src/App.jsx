@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
-
+import { Analytics } from "@vercel/analytics/react";
 /** ===== Helpers ===== */
 function todayISO() {
   const d = new Date();
@@ -282,7 +282,7 @@ export default function App() {
       .filter((ex) => ex.name);
 
     if (!cleanedExercises.length) {
-      alert("Bạn nhập ít nhất 1 bài tập nha 😄");
+      alert("nhập bài tập vào cho tao:))  ");
       return;
     }
 
@@ -314,7 +314,7 @@ export default function App() {
     <div className="gl-page">
       <header className="gl-header">
         <div>
-          <h1 className="gl-title">Gym Log</h1>
+          <h1 className="gl-title">nhấc mông lên đi tập đi:))</h1>
           <p className="gl-sub">Nhập ngày • chọn Day • thêm nhiều bài • set/reps/kg — lưu tự động</p>
         </div>
         <div className="gl-pill">tiensebu</div>

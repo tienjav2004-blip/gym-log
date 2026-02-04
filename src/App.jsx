@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
-import { Analytics } from "@vercel/analytics/react";
+
 /** ===== Helpers ===== */
 function todayISO() {
   const d = new Date();
@@ -13,35 +13,11 @@ function todayISO() {
 function uid() {
   return (
     Math.random().toString(16).slice(2) +
-    "-" +
+    "_" +
     Date.now().toString(16) +
-    "-" +
+    "_" +
     Math.random().toString(16).slice(2)
   );
-}
-
-/** ISO week key: YYYY-Www */
-function isoWeekKey(dateISO) {
-  const d = new Date(dateISO + "T00:00:00");
-  // ISO week: Thursday-based
-  const day = (d.getDay() + 6) % 7; // Mon=0..Sun=6
-  const thursday = new Date(d);
-  thursday.setDate(d.getDate() - day + 3);
-
-  const firstThursday = new Date(thursday.getFullYear(), 0, 4);
-  const firstDay = (firstThursday.getDay() + 6) % 7;
-  firstThursday.setDate(firstThursday.getDate() - firstDay + 3);
-
-  const diff = thursday - firstThursday;
-  const week = 1 + Math.round(diff / (7 * 24 * 3600 * 1000));
-  const yyyy = thursday.getFullYear();
-  return `${yyyy}-W${String(week).padStart(2, "0")}`;
-}
-
-function prettyDate(dateISO) {
-  // dd/mm/yyyy
-  const [y, m, d] = dateISO.split("-");
-  return `${d}/${m}/${y}`;
 }
 
 function clampNum(v) {
@@ -49,27 +25,33 @@ function clampNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function calcSetVolume(set) {
-  return clampNum(set.reps) * clampNum(set.kg);
-}
-
-function calcExerciseVolume(ex) {
-  return (ex.sets || []).reduce((sum, s) => sum + calcSetVolume(s), 0);
-}
-
-function calcEntryVolume(entry) {
-  return (entry.exercises || []).reduce((sum, ex) => sum + calcExerciseVolume(ex), 0);
-}
-
-function calcEntrySets(entry) {
-  return (entry.exercises || []).reduce((sum, ex) => sum + (ex.sets?.length || 0), 0);
+function prettyDate(dateISO) {
+  // dd/mm/yyyy
+  const [y, m, d] = String(dateISO).split("-");
+  if (!y || !m || !d) return dateISO;
+  return `${d}/${m}/${y}`;
 }
 
 function calcEntryReps(entry) {
-  return (entry.exercises || []).reduce(
-    (sum, ex) => sum + (ex.sets || []).reduce((s2, s) => s2 + clampNum(s.reps), 0),
-    0
-  );
+  return (entry.exercises || []).reduce((sum, ex) => {
+    return (
+      sum +
+      (ex.sets || []).reduce((s2, s) => s2 + clampNum(s.reps || 0), 0)
+    );
+  }, 0);
+}
+
+function calcEntryVolume(entry) {
+  // reps * kg
+  return (entry.exercises || []).reduce((sum, ex) => {
+    return (
+      sum +
+      (ex.sets || []).reduce(
+        (s2, s) => s2 + clampNum(s.reps || 0) * clampNum(s.kg || 0),
+        0
+      )
+    );
+  }, 0);
 }
 
 /** ===== Default data ===== */
@@ -85,191 +67,169 @@ const PLAN = [
   { key: "D7", label: "Day 7: Off / yếu" },
 ];
 
-// danh sách gợi ý ban đầu (bạn sửa/add thoải mái)
-const BASE_EXERCISES = [
-  "Bench Press",
-  "Incline Bench Press",
-  "Dumbbell Press",
-  "Cable Fly",
-  "Push Up",
-  "Tricep Pushdown",
-  "Overhead Tricep Extension",
-  "Lat Pulldown",
-  "Pull Up",
-  "Barbell Row",
-  "Seated Row",
-  "Deadlift",
-  "Bicep Curl",
-  "Hammer Curl",
-  "Squat",
-  "Leg Press",
-  "Romanian Deadlift (RDL)",
-  "Leg Extension",
-  "Leg Curl",
-  "Calf Raise",
-  "Overhead Press",
-  "Lateral Raise",
-  "Rear Delt Fly",
-  "Plank",
-  "Crunch",
-  "Hanging Leg Raise",
-  "Running",
-  "Cycling",
-  "Stairmaster",
-];
-
-/** ===== UI building blocks ===== */
-function emptySet() {
-  return { id: uid(), reps: 10, kg: 0 };
+function emptyExercise() {
+  return {
+    id: uid(),
+    name: "",
+    sets: [{ id: uid(), reps: 10, kg: 0 }],
+  };
 }
 
-function emptyExercise() {
-  return { id: uid(), name: "", sets: [emptySet()] };
+function emptyDraft() {
+  return {
+    date: todayISO(),
+    planKey: "D1",
+    exercises: [emptyExercise()],
+  };
 }
 
 export default function App() {
-  /** Form state */
-  const [date, setDate] = useState(todayISO());
-  const [planKey, setPlanKey] = useState("D1");
-  const [exercisesDraft, setExercisesDraft] = useState([emptyExercise()]);
-
-  /** Log state */
   const [entries, setEntries] = useState([]);
+  const [draft, setDraft] = useState(emptyDraft());
 
-  /** Load saved */
+  /** Load localStorage */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setEntries(JSON.parse(raw));
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) setEntries(parsed);
     } catch (e) {
-      console.log(e);
+      console.log("Load error:", e);
     }
   }, []);
 
-  /** Save */
+  /** Save localStorage */
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
     } catch (e) {
-      console.log(e);
+      console.log("Save error:", e);
     }
   }, [entries]);
 
-  /** Exercise suggestions: base + history */
+  const planLabel = useMemo(() => {
+    return PLAN.find((p) => p.key === draft.planKey)?.label || "";
+  }, [draft.planKey]);
+
+  /** Suggestions */
   const exerciseSuggestions = useMemo(() => {
-    const set = new Set(BASE_EXERCISES.map((s) => s.trim()).filter(Boolean));
+    const set = new Set();
     for (const entry of entries) {
       for (const ex of entry.exercises || []) {
-        if (ex?.name?.trim()) set.add(ex.name.trim());
+        const nm = (ex.name || "").trim();
+        if (nm) set.add(nm);
       }
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [entries]);
 
-  /** Stats (weekly) */
+  /** Weekly stats (very simple) */
   const weeklyStats = useMemo(() => {
-    const map = new Map(); // weekKey -> stats
+    // group by YYYY-WW (ISO-ish, simplified)
+    const map = new Map();
+    const dToWeekKey = (iso) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "unknown";
+      // Thursday-based week number trick
+      const thursday = new Date(d);
+      const day = (thursday.getDay() + 6) % 7; // Mon=0..Sun=6
+      thursday.setDate(thursday.getDate() - day + 3); // move to Thursday
+      const firstThursday = new Date(thursday.getFullYear(), 0, 4);
+      const firstDay = (firstThursday.getDay() + 6) % 7;
+      firstThursday.setDate(firstThursday.getDate() - firstDay + 3);
+      const diff = thursday - firstThursday;
+      const week = 1 + Math.round(diff / (7 * 24 * 3600 * 1000));
+      const yyyy = thursday.getFullYear();
+      return `${yyyy}-W${String(week).padStart(2, "0")}`;
+    };
+
     for (const entry of entries) {
-      const wk = isoWeekKey(entry.date);
-      const prev = map.get(wk) || {
-        weekKey: wk,
-        volume: 0,
-        sets: 0,
-        reps: 0,
-        topExercise: new Map(), // name -> volume
-      };
-
-      const v = calcEntryVolume(entry);
-      const s = calcEntrySets(entry);
-      const r = calcEntryReps(entry);
-
-      prev.volume += v;
-      prev.sets += s;
-      prev.reps += r;
-
-      for (const ex of entry.exercises || []) {
-        const name = (ex.name || "").trim();
-        if (!name) continue;
-        const ev = calcExerciseVolume(ex);
-        prev.topExercise.set(name, (prev.topExercise.get(name) || 0) + ev);
-      }
-
+      const wk = dToWeekKey(entry.date);
+      const reps = calcEntryReps(entry);
+      const vol = calcEntryVolume(entry);
+      const prev = map.get(wk) || { wk, sessions: 0, reps: 0, vol: 0 };
+      prev.sessions += 1;
+      prev.reps += reps;
+      prev.vol += vol;
       map.set(wk, prev);
     }
 
-    // convert to list sorted desc by weekKey
-    const list = Array.from(map.values()).sort((a, b) => (a.weekKey < b.weekKey ? 1 : -1));
-
-    // make top3 text
-    return list.map((w) => {
-      const top = Array.from(w.topExercise.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([name, vol]) => ({ name, vol }));
-      return { ...w, top };
-    });
+    return Array.from(map.values()).sort((a, b) => (a.wk < b.wk ? 1 : -1));
   }, [entries]);
 
-  /** Entry list (newest first) */
   const entriesSorted = useMemo(() => {
     return [...entries].sort((a, b) => (a.date < b.date ? 1 : -1));
   }, [entries]);
 
-  /** ===== Draft actions ===== */
-  function updateExerciseName(exId, name) {
-    setExercisesDraft((prev) =>
-      prev.map((ex) => (ex.id === exId ? { ...ex, name } : ex))
-    );
+  /** Draft actions */
+  function setDraftDate(v) {
+    setDraft((prev) => ({ ...prev, date: v }));
+  }
+  function setDraftPlanKey(v) {
+    setDraft((prev) => ({ ...prev, planKey: v }));
   }
 
   function addExercise() {
-    setExercisesDraft((prev) => [...prev, emptyExercise()]);
+    setDraft((prev) => ({ ...prev, exercises: [...prev.exercises, emptyExercise()] }));
   }
 
   function removeExercise(exId) {
-    setExercisesDraft((prev) => prev.filter((ex) => ex.id !== exId));
+    setDraft((prev) => ({
+      ...prev,
+      exercises: prev.exercises.filter((ex) => ex.id !== exId),
+    }));
+  }
+
+  function updateExerciseName(exId, name) {
+    setDraft((prev) => ({
+      ...prev,
+      exercises: prev.exercises.map((ex) => (ex.id === exId ? { ...ex, name } : ex)),
+    }));
   }
 
   function addSet(exId) {
-    setExercisesDraft((prev) =>
-      prev.map((ex) =>
-        ex.id === exId ? { ...ex, sets: [...ex.sets, emptySet()] } : ex
-      )
-    );
+    setDraft((prev) => ({
+      ...prev,
+      exercises: prev.exercises.map((ex) => {
+        if (ex.id !== exId) return ex;
+        return { ...ex, sets: [...(ex.sets || []), { id: uid(), reps: 10, kg: 0 }] };
+      }),
+    }));
   }
 
   function removeSet(exId, setId) {
-    setExercisesDraft((prev) =>
-      prev.map((ex) => {
+    setDraft((prev) => ({
+      ...prev,
+      exercises: prev.exercises.map((ex) => {
         if (ex.id !== exId) return ex;
-        const nextSets = ex.sets.filter((s) => s.id !== setId);
-        return { ...ex, sets: nextSets.length ? nextSets : [emptySet()] };
-      })
-    );
+        return { ...ex, sets: (ex.sets || []).filter((s) => s.id !== setId) };
+      }),
+    }));
   }
 
-  function updateSetField(exId, setId, field, value) {
-    setExercisesDraft((prev) =>
-      prev.map((ex) => {
+  function updateSet(exId, setId, patch) {
+    setDraft((prev) => ({
+      ...prev,
+      exercises: prev.exercises.map((ex) => {
         if (ex.id !== exId) return ex;
         return {
           ...ex,
-          sets: ex.sets.map((s) =>
-            s.id === setId ? { ...s, [field]: value } : s
-          ),
+          sets: (ex.sets || []).map((s) => (s.id === setId ? { ...s, ...patch } : s)),
         };
-      })
+      }),
+    }));
+  }
+
+  function calcExerciseVolume(ex) {
+    return (ex.sets || []).reduce(
+      (sum, s) => sum + clampNum(s.reps || 0) * clampNum(s.kg || 0),
+      0
     );
   }
 
-  function resetForm() {
-    setPlanKey("D1");
-    setExercisesDraft([emptyExercise()]);
-  }
-
-  /** ===== Save entry ===== */
   function saveEntry() {
-    const cleanedExercises = exercisesDraft
+    const cleanedExercises = (draft.exercises || [])
       .map((ex) => ({
         ...ex,
         name: (ex.name || "").trim(),
@@ -279,43 +239,39 @@ export default function App() {
           kg: clampNum(s.kg),
         })),
       }))
-      .filter((ex) => ex.name);
-
-    if (!cleanedExercises.length) {
-      alert("nhập bài tập vào cho tao:))  ");
-      return;
-    }
+      .filter((ex) => ex.name); // bỏ bài trống
 
     const entry = {
       id: uid(),
-      date,
-      planKey,
-      planLabel: PLAN.find((p) => p.key === planKey)?.label || planKey,
-      exercises: cleanedExercises,
+      date: draft.date || todayISO(),
+      planKey: draft.planKey || "D1",
+      planLabel: PLAN.find((p) => p.key === (draft.planKey || "D1"))?.label || "",
+      exercises: cleanedExercises.length ? cleanedExercises : [],
       createdAt: Date.now(),
     };
 
     setEntries((prev) => [entry, ...prev]);
-    resetForm();
+    setDraft(emptyDraft());
   }
 
-  /** ===== Delete ===== */
-  function deleteEntry(id) {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+  function loadTemplate() {
+    setDraft(emptyDraft());
   }
 
   function clearAll() {
     if (!confirm("Xóa toàn bộ lịch sử?")) return;
     setEntries([]);
+    setDraft(emptyDraft());
   }
 
-  /** ===== Render ===== */
   return (
     <div className="gl-page">
       <header className="gl-header">
         <div>
-          <h1 className="gl-title">nhấc mông lên đi tập đi:))</h1>
-          <p className="gl-sub">Nhập ngày • chọn Day • thêm nhiều bài • set/reps/kg — lưu tự động</p>
+          <h1 className="gl-title">Nhấc mông lên đi tập thôi 🤭</h1>
+          <p className="gl-sub">
+            Nhập ngày • chọn Day • thêm nhiều bài • set/reps/kg — lưu tự động
+          </p>
         </div>
         <div className="gl-pill">tiensebu</div>
       </header>
@@ -323,24 +279,24 @@ export default function App() {
       <div className="gl-grid">
         {/* Left: Form */}
         <section className="gl-card">
-          <h2 className="gl-h2">Nhập buổi tập</h2>
+          <h2 className="gl-h2">trong tập</h2>
 
           <div className="gl-row">
             <div className="gl-label">Ngày</div>
             <input
               className="gl-input"
               type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
+              value={draft.date}
+              onChange={(e) => setDraftDate(e.target.value)}
             />
           </div>
 
           <div className="gl-row">
-            <div className="gl-label">Buổi (theo lịch)</div>
+            <div className="gl-label">(theo)</div>
             <select
               className="gl-input"
-              value={planKey}
-              onChange={(e) => setPlanKey(e.target.value)}
+              value={draft.planKey}
+              onChange={(e) => setDraftPlanKey(e.target.value)}
             >
               {PLAN.map((p) => (
                 <option key={p.key} value={p.key}>
@@ -350,214 +306,154 @@ export default function App() {
             </select>
           </div>
 
-          <div className="gl-sets-head">
-            <div className="gl-sets-title">Bài tập ({exercisesDraft.length})</div>
-            <button className="gl-btn gl-btn-primary" onClick={addExercise}>
+          <div className="gl-sectionTitle">
+            <div>
+              <b>Bài tập ({draft.exercises.length})</b>
+            </div>
+            <button className="gl-btn" onClick={addExercise}>
               + Thêm bài
             </button>
           </div>
 
-          <datalist id="exercise-suggestions">
-            {exerciseSuggestions.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-
-          <div className="gl-sets">
-            {exercisesDraft.map((ex, idx) => (
-              <div className="gl-set" key={ex.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                  <div className="gl-set-label">Bài {idx + 1}</div>
-                  {exercisesDraft.length > 1 && (
-                    <button
-                      className="gl-btn gl-btn-danger"
-                      onClick={() => removeExercise(ex.id)}
-                      title="Xóa bài"
-                    >
-                      Xóa bài
-                    </button>
-                  )}
-                </div>
-
-                <div className="gl-row">
-                  <div className="gl-label">Tên bài</div>
+          {draft.exercises.map((ex, idx) => (
+            <div key={ex.id} className="gl-ex">
+              <div className="gl-exTop">
+                <div className="gl-exName">
+                  <div className="gl-small">Bài {idx + 1}</div>
+                  <div className="gl-small">Tên bài</div>
                   <input
                     className="gl-input"
-                    placeholder="VD: Bench Press / Lat Pulldown / Squat..."
+                    list="ex-suggest"
+                    placeholder="VD: Đẩy tạ nằm / Kéo tạ xuống / Ngồi xổm..."
                     value={ex.name}
-                    list="exercise-suggestions"
                     onChange={(e) => updateExerciseName(ex.id, e.target.value)}
                   />
+                  <datalist id="ex-suggest">
+                    {exerciseSuggestions.map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
                 </div>
 
-                <div className="gl-sets-head" style={{ marginTop: 8 }}>
-                  <div className="gl-sets-title">Sets ({ex.sets.length})</div>
-                  <button className="gl-btn gl-btn-ghost" onClick={() => addSet(ex.id)}>
-                    + Thêm set
+                <button className="gl-btnDanger" onClick={() => removeExercise(ex.id)}>
+                  ✕
+                </button>
+              </div>
+
+              <div className="gl-sectionTitle">
+                <div>
+                  <b>Tập hợp ({(ex.sets || []).length})</b>
+                </div>
+                <button className="gl-btn" onClick={() => addSet(ex.id)}>
+                  + Thêm bộ
+                </button>
+              </div>
+
+              {(ex.sets || []).map((s, i) => (
+                <div key={s.id} className="gl-setRow">
+                  <div className="gl-setLabel">Bộ {i + 1} — Số lần lặp</div>
+                  <input
+                    className="gl-input gl-num"
+                    type="number"
+                    value={s.reps}
+                    onChange={(e) => updateSet(ex.id, s.id, { reps: e.target.value })}
+                  />
+
+                  <div className="gl-setLabel">Kg</div>
+                  <input
+                    className="gl-input gl-num"
+                    type="number"
+                    value={s.kg}
+                    onChange={(e) => updateSet(ex.id, s.id, { kg: e.target.value })}
+                  />
+
+                  <button className="gl-btnDanger" onClick={() => removeSet(ex.id, s.id)}>
+                    ✕
                   </button>
                 </div>
+              ))}
 
-                <div className="gl-sets">
-                  {ex.sets.map((s, si) => (
-                    <div className="gl-set" key={s.id} style={{ marginTop: 6 }}>
-                      <div className="gl-set-grid">
-                        <div>
-                          <div className="gl-mini">Set {si + 1} — Reps</div>
-                          <input
-                            className="gl-input"
-                            type="number"
-                            min="0"
-                            value={s.reps}
-                            onChange={(e) =>
-                              updateSetField(ex.id, s.id, "reps", e.target.value)
-                            }
-                          />
-                        </div>
-
-                        <div>
-                          <div className="gl-mini">Kg</div>
-                          <input
-                            className="gl-input"
-                            type="number"
-                            min="0"
-                            step="0.5"
-                            value={s.kg}
-                            onChange={(e) =>
-                              updateSetField(ex.id, s.id, "kg", e.target.value)
-                            }
-                          />
-                        </div>
-
-                        <button
-                          className="gl-btn gl-btn-x"
-                          onClick={() => removeSet(ex.id, s.id)}
-                          title="Xóa set"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="gl-hint">
-                  Volume bài này: <b>{calcExerciseVolume(ex)}</b> (reps × kg)
-                </div>
+              <div className="gl-muted">
+                Khối lượng bài này: <b>{calcExerciseVolume(ex)}</b> (số lần × kg)
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
 
           <div className="gl-actions">
-            <button className="gl-btn gl-btn-primary" onClick={saveEntry}>
-              Lưu buổi tập
+            <button className="gl-btnPrimary" onClick={saveEntry}>
+              Lưu HỘI
             </button>
-            <button className="gl-btn gl-btn-ghost" onClick={resetForm}>
-              Xóa form
+            <button className="gl-btn" onClick={loadTemplate}>
+              biểu mẫu
+            </button>
+            <button className="gl-btnGhost" onClick={clearAll}>
+              Xóa hết
             </button>
           </div>
 
-          <div className="gl-footnote">
-            Lưu tự động bằng <b>localStorage</b> (đóng mở lại vẫn còn). Sau này mình nâng cấp export Excel / cloud sync cũng được.
+          <div className="gl-muted">
+            Lưu tự động bằng localStorage (vẫn đóng mở lại). Sau đó bạn nâng cấp xuất
+            Excel / cloud sync của mình cũng được.
           </div>
         </section>
 
-        {/* Right: History + Stats */}
-        <section className="gl-card">
-          <div className="gl-item-top" style={{ marginBottom: 10 }}>
-            <h2 className="gl-h2" style={{ margin: 0 }}>Lịch sử</h2>
-            <button className="gl-btn gl-btn-danger" onClick={clearAll}>
-              Xóa tất cả
-            </button>
-          </div>
+        {/* Right: Stats */}
+        <aside className="gl-card">
+          <h2 className="gl-h2">lịch</h2>
 
-          {/* Weekly stats */}
-          <div className="gl-set" style={{ marginBottom: 12 }}>
-            <div className="gl-set-label">Thống kê theo tuần</div>
+          <div className="gl-box">
+            <div className="gl-boxTitle">hàng tuần theo</div>
             {weeklyStats.length === 0 ? (
-              <div className="gl-empty">Chưa có dữ liệu để thống kê 😄</div>
+              <div className="gl-muted">Không có dữ liệu.</div>
             ) : (
-              <div className="gl-list">
-                {weeklyStats.slice(0, 4).map((w) => (
-                  <div className="gl-item" key={w.weekKey}>
-                    <div className="gl-item-top">
-                      <div>
-                        <div className="gl-item-title">{w.weekKey}</div>
-                        <div className="gl-item-meta">
-                          <span className="gl-pill">Volume: <b>{Math.round(w.volume)}</b></span>
-                          <span className="gl-pill">Sets: <b>{w.sets}</b></span>
-                          <span className="gl-pill">Reps: <b>{w.reps}</b></span>
-                        </div>
-                      </div>
+              <div className="gl-weekList">
+                {weeklyStats.slice(0, 6).map((w) => (
+                  <div key={w.wk} className="gl-weekRow">
+                    <div className="gl-weekKey">{w.wk}</div>
+                    <div className="gl-weekMeta">
+                      <span>{w.sessions} buổi</span>
+                      <span>{w.reps} reps</span>
+                      <span>{Math.round(w.vol)} vol</span>
                     </div>
-
-                    {w.top?.length ? (
-                      <div className="gl-chips">
-                        {w.top.map((t) => (
-                          <span className="gl-chip" key={t.name}>
-                            {t.name}: {Math.round(t.vol)}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Entries */}
-          {entriesSorted.length === 0 ? (
-            <div className="gl-empty">
-              Chưa có dữ liệu. Nhập buổi tập bên trái là lên đời ngay 😄
-            </div>
-          ) : (
-            <div className="gl-list">
-              {entriesSorted.map((e) => (
-                <div className="gl-item" key={e.id}>
-                  <div className="gl-item-top">
-                    <div>
-                      <div className="gl-item-title">
-                        {e.planLabel} • {prettyDate(e.date)}
-                      </div>
-                      <div className="gl-item-meta">
-                        <span className="gl-pill">Bài: <b>{e.exercises?.length || 0}</b></span>
-                        <span className="gl-pill">Sets: <b>{calcEntrySets(e)}</b></span>
-                        <span className="gl-pill">Reps: <b>{calcEntryReps(e)}</b></span>
-                        <span className="gl-pill">Volume: <b>{Math.round(calcEntryVolume(e))}</b></span>
-                      </div>
+          <div className="gl-box">
+            <div className="gl-boxTitle">mới nhất</div>
+            {entriesSorted.length === 0 ? (
+              <div className="gl-muted">No data. Nhập buổi tập đầu tiên nào 😄</div>
+            ) : (
+              <div className="gl-entryList">
+                {entriesSorted.slice(0, 8).map((e) => (
+                  <div key={e.id} className="gl-entry">
+                    <div className="gl-entryTop">
+                      <b>{prettyDate(e.date)}</b>
+                      <span className="gl-chip">
+                        {PLAN.find((p) => p.key === e.planKey)?.label || e.planLabel}
+                      </span>
                     </div>
 
-                    <button className="gl-btn gl-btn-danger" onClick={() => deleteEntry(e.id)}>
-                      Xóa
-                    </button>
-                  </div>
+                    <div className="gl-muted">
+                      {e.exercises?.length || 0} bài • {calcEntryReps(e)} reps •{" "}
+                      {Math.round(calcEntryVolume(e))} vol
+                    </div>
 
-                  {/* Exercises detail */}
-                  <div className="gl-chips" style={{ marginTop: 10 }}>
-                    {(e.exercises || []).map((ex) => (
-                      <span className="gl-chip" key={ex.id}>
-                        {ex.name} — {Math.round(calcExerciseVolume(ex))}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Sets preview */}
-                  {(e.exercises || []).map((ex) => (
-                    <div className="gl-chips" key={ex.id + "-sets"} style={{ marginTop: 8 }}>
-                      {(ex.sets || []).map((s, i) => (
-                        <span className="gl-pill" key={s.id}>
-                          {ex.name} • Set {i + 1}: {s.reps} reps × {s.kg} kg
+                    <div className="gl-chips">
+                      {(e.exercises || []).slice(0, 6).map((ex) => (
+                        <span key={ex.id} className="gl-chip">
+                          {ex.name} — {Math.round(calcExerciseVolume(ex))}
                         </span>
                       ))}
                     </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <footer className="gl-footer">Tự lưu trên máy • version V2</footer>
-        </section>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );
